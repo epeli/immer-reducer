@@ -6,10 +6,11 @@ import {
     setPrefix,
     _clearKnownClasses,
     isAction,
-    isActionFrom,
+    isActionFrom, beginAccumulatingPatches, popAccumulatedPatches, stopAccumulatingPatches,
 } from "../src/immer-reducer";
 
 import {createStore, combineReducers, Action} from "redux";
+import {applyPatches, Patch} from "immer";
 
 beforeEach(_clearKnownClasses);
 
@@ -513,4 +514,92 @@ test("can replace the draft state with completely new state", () => {
         foo: "new",
         ding: "new",
     });
+});
+
+test("can accumulate patches from a single reducer", () => {
+    const initialState = {foo: "foo"};
+
+    class TestReducer extends ImmerReducer<typeof initialState> {
+        setFoo(foo: string) {
+            this.draftState.foo = foo;
+        }
+    }
+
+    const ActionCreators = createActionCreators(TestReducer);
+
+    const reducer = createReducerFunction(TestReducer);
+    const store = createStore(reducer, initialState);
+
+    beginAccumulatingPatches();
+    store.dispatch(ActionCreators.setFoo("foo2"));
+    store.dispatch(ActionCreators.setFoo("foo3"));
+
+    try {
+        expect(popAccumulatedPatches()).toEqual([
+            {
+                op: "replace",
+                path: ["foo"],
+                value: "foo2"
+            },
+            {
+                op: "replace",
+                path: ["foo"],
+                value: "foo3"
+            }]);
+
+        expect(popAccumulatedPatches()).toEqual([]);
+    } finally {
+        stopAccumulatingPatches();
+    }
+});
+
+test("can accumulate patches from multiple reducers", () => {
+    const initialState = {foo: "foo"};
+
+    class R1 extends ImmerReducer<typeof initialState> {
+        static patchPathPrefix = ["r1"];
+        setFoo(foo: string) {
+            this.draftState.foo = foo;
+        }
+    }
+
+    class R2 extends R1 {
+        static patchPathPrefix = ["r2"];
+    }
+
+    const ActionCreators1 = createActionCreators(R1);
+    const ActionCreators2 = createActionCreators(R2);
+
+    const r1 = createReducerFunction(R1, initialState);
+    const r2 = createReducerFunction(R2, initialState);
+
+    const reducer = combineReducers({r1, r2});
+
+    const store = createStore(reducer);
+
+    beginAccumulatingPatches();
+    store.dispatch(ActionCreators1.setFoo("foo2"));
+    store.dispatch(ActionCreators2.setFoo("foo3"));
+
+    try {
+        const patches = popAccumulatedPatches();
+        expect(patches).toEqual([
+            {
+                op: "replace",
+                path: ["r1", "foo"],
+                value: "foo2"
+            },
+            {
+                op: "replace",
+                path: ["r2", "foo"],
+                value: "foo3"
+            }]);
+
+        expect(popAccumulatedPatches()).toEqual([]);
+
+        expect(applyPatches({r1: initialState, r2: initialState}, patches))
+            .toEqual(store.getState());
+    } finally {
+        stopAccumulatingPatches();
+    }
 });

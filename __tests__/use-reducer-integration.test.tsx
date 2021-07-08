@@ -18,11 +18,11 @@ test("can use with React.useReducer()", () => {
     }
 
     const ActionCreators = createActionCreators(Reducer);
-    const reducerFuntion = createReducerFunction(Reducer);
+    const reducerFunction = createReducerFunction(Reducer);
 
     function Foo() {
         const [state, dispatch] = React.useReducer(
-            reducerFuntion,
+            reducerFunction,
             initialState,
         );
 

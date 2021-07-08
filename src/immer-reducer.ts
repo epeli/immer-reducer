@@ -1,6 +1,8 @@
-import produce, {Draft} from "immer";
+import produce, {Draft, Patch, produceWithPatches} from "immer";
 
-let actionTypePrefix = "IMMER_REDUCER";
+let actionTypePrefix : string = "IMMER_REDUCER";
+let accumulatePatches : boolean = false;
+let patches : Patch[] = [];
 
 /** get function arguments as tuple type */
 type ArgumentsType<T> = T extends (...args: infer V) => any ? V : never;
@@ -44,6 +46,7 @@ export type Actions<T extends ImmerReducerClass> = ReturnTypeUnion<
 /** type constraint for the ImmerReducer class  */
 export interface ImmerReducerClass {
     customName?: string;
+    patchPathPrefix?: string[];
     new (...args: any[]): ImmerReducer<any>;
 }
 
@@ -170,6 +173,7 @@ export function composeReducers<State>(
 /** The actual ImmerReducer class */
 export class ImmerReducer<T> {
     static customName?: string;
+    static patchPathPrefix?: string[];
     readonly state: T;
     draftState: Draft<T>; // Make read only states mutable using Draft
 
@@ -345,7 +349,7 @@ export function createReducerFunction<T extends ImmerReducerClass>(
 
         const [_, methodName] = removePrefix(action.type as string).split("#");
 
-        return produce(state, draftState => {
+        const reducer = (draftState : T) => {
             const reducers: any = new immerReducerClass(draftState, state);
 
             reducers[methodName](...getArgsFromImmerAction(action as any));
@@ -363,12 +367,40 @@ export function createReducerFunction<T extends ImmerReducerClass>(
 
             // Also using immer internally with anys like this allow us to
             // support multiple versions of immer.
-        }) as any;
+        };
+
+        if (accumulatePatches) {
+            const [newState, newPatches, _]: [T, Patch[], Patch[]] = produceWithPatches(state, reducer);
+            if (immerReducerClass.patchPathPrefix) {
+                newPatches.forEach(patch =>
+                    patch.path.unshift(...immerReducerClass.patchPathPrefix!));
+            }
+            patches.push(...newPatches);
+            return newState;
+        } else {
+            return produce(state, reducer);
+        }
     };
 }
 
 export function setPrefix(prefix: string): void {
     actionTypePrefix = prefix;
+}
+
+export function beginAccumulatingPatches(): void {
+    accumulatePatches = true;
+    patches = [];
+}
+
+export function popAccumulatedPatches(): Patch[] {
+    const accumulated = patches;
+    patches = [];
+    return accumulated;
+}
+
+export function stopAccumulatingPatches(): void {
+    accumulatePatches = false;
+    patches = [];
 }
 
 /**

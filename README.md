@@ -408,3 +408,84 @@ export const reducer = composeReducers(
   createReducerFunction(MyAgeReducer, initialState)
 )
 ```
+
+### `function beginAccumulatingPatches()`
+
+Enable accumulation of immer patches.
+Note: There is a performance penalty to immer's patching mechanism
+
+Example
+
+```ts
+beginAccumulatingPatches();
+```
+
+### `function popAccumulatedPatches(): Patch[]`
+
+Removed and return the accumulated patches.
+If your reducer will be combined with others using redux's `combineReducers` function,
+you may specify a `static patchPathPrefix: string[]` in your reducer class to produce patches that
+can be applied to the top level state.
+
+Example
+
+```ts
+    const initialState = {foo: "foo"};
+
+    class R1 extends ImmerReducer<typeof initialState> {
+        static patchPathPrefix = ["r1"];
+        setFoo(foo: string) {
+            this.draftState.foo = foo;
+        }
+    }
+
+    class R2 extends R1 {
+        static patchPathPrefix = ["r2"];
+    }
+
+    const ActionCreators1 = createActionCreators(R1);
+    const ActionCreators2 = createActionCreators(R2);
+
+    const r1 = createReducerFunction(R1, initialState);
+    const r2 = createReducerFunction(R2, initialState);
+
+    const reducer = combineReducers({r1, r2});
+
+    const store = createStore(reducer);
+
+    beginAccumulatingPatches();
+    store.dispatch(ActionCreators1.setFoo("foo2"));
+    store.dispatch(ActionCreators2.setFoo("foo3"));
+
+    try {
+        const patches = popAccumulatedPatches();
+        expect(patches).toEqual([
+            {
+                op: "replace",
+                path: ["r1", "foo"],
+                value: "foo2"
+            },
+            {
+                op: "replace",
+                path: ["r2", "foo"],
+                value: "foo3"
+            }]);
+
+        expect(popAccumulatedPatches()).toEqual([]);
+
+        expect(applyPatches({r1: initialState, r2: initialState}, patches))
+            .toEqual(store.getState());
+    } finally {
+        stopAccumulatingPatches();
+    }
+```
+
+### `function stopAccumulatingPatches()`
+
+Disable accumulation of immer patches.
+
+Example
+
+```ts
+stopAccumulatingPatches();
+```
